@@ -24,6 +24,10 @@
         # heartbeatoff=Y
      
         asyncthread = 6
+
+        #open day log, default is N; Y means open day log
+        openDayLog = N
+                
     </reap>
     <objname>
         #patch对象
@@ -37,7 +41,7 @@
         min_block = 50
         max_block = 200
         factor    = 1.2
-        FilePath  = /usr/local/app/tars/tarsregistry/util/objectCache.dat
+        FilePath  = TARS_PATH/tarsregistry/util/objectCache.dat
         FileSize  = 8M
     </objcache>
     <nodeinfo>

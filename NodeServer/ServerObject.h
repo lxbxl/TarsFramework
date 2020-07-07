@@ -25,7 +25,7 @@
 #include "util/tc_config.h"
 #include "servant/AdminF.h"
 #include "servant/NodeF.h"
-#include "servant/TarsLogger.h"
+#include "servant/RemoteLogger.h"
 #include "PlatformInfo.h"
 #include "PropertyReporter.h"
 #include "ServerLimitResource.h"
@@ -33,7 +33,8 @@
 using namespace tars;
 using namespace std;
 
-class ServerObject : public TC_ThreadRecLock, public TC_HandleBase
+//class ServerObject : public TC_ThreadRecLock, public TC_HandleBase
+class ServerObject : public TC_ThreadRecLock, public RegistryPrxCallback
 {
 public:
     enum InternalServerState
@@ -252,6 +253,11 @@ public:
 	 */
 	bool isStarted() {return _started;}
 
+    /**
+     * save pid 
+     */
+    int64_t savePid();
+
 public:
 
     /**
@@ -392,29 +398,30 @@ public:
 public:
     ServerDescriptor getServerDescriptor() { return  _desc; }
     ActivatorPtr getActivator() { return  _activatorPtr; }
-    string getExePath(){return _exePath;}
-    string getExeFile(){return _exeFile;}
-    string getConfigFile(){return _confFile;}
-    string getLogPath(){return _logPath;}
-    string getLibPath(){return _libPath;}
-    string getServerDir(){return _serverDir;}
-    string getServerId(){return _serverId;}
-    string getServerType(){return _serverType;}
-    string getStartScript() {return _startScript;}
-    string getStopScript() {return _stopScript;}
-    string getMonitorScript() {return _monitorScript;}
-    string getEnv() { return _env; }
-    string getRedirectPath() {return _redirectPath;}
+    // string getRunningTmpPath();
+    const string & getExePath() {return _exePath;}
+    const string & getExeFile() {return _exeFile;}
+    const string & getConfigFile(){return _confFile;}
+    const string & getLogPath(){return _logPath;}
+    const string & getLibPath(){return _libPath;}
+    const string & getServerDir(){return _serverDir;}
+    const string & getServerId(){return _serverId;}
+    const string & getServerType(){return _serverType;}
+    const string & getStartScript() {return _startScript;}
+    const string & getStopScript() {return _stopScript;}
+    const string & getMonitorScript() {return _monitorScript;}
+    const string & getEnv() { return _env; }
+    const string & getRedirectPath() {return _redirectPath;}
 
     //java服务
-    string getJvmParams() {return _jvmParams;}
-    string getMainClass() {return _mainClass;}
-    string getClassPath() {return _classPath;}
-    string getBackupFileNames(){return _backupFiles;}
+    const string & getJvmParams() {return _jvmParams;}
+    const string & getMainClass() {return _mainClass;}
+    const string & getClassPath() {return _classPath;}
+    const string & getBackupFileNames(){return _backupFiles;}
 
     void setServerDescriptor( const ServerDescriptor& tDesc );
     void setVersion( const string &version );
-    void setExeFile(const string &sExeFile){_exeFile = sExeFile;}
+    void setExeFile(const string &sExeFile);
     void setExePath(const string &sExePath){_exePath = sExePath;}
     void setConfigFile(const string &sConfFile){_confFile = sConfFile;}
     void setLogPath(const string &sLogPath){_logPath = sLogPath;}
@@ -463,6 +470,13 @@ public:
 
     bool setServerCoreLimit(bool bCloseCore);
 
+public:
+    void onUpdateServerResult(int result);
+
+    virtual void callback_updateServer(tars::Int32 ret);
+
+    virtual void callback_updateServer_exception(tars::Int32 ret);
+
 private:
     bool    _tarsServer;                //是否tars服务
     string  _serverType;               //服务类型  tars_cpp tars_java not_tars
@@ -504,7 +518,7 @@ private:
     PatchInfo           _patchInfo;            //下载信息
 
 private:
-    int64_t               _pid;                  //服务进程号
+    int64_t             _pid;                  //服务进程号
     string              _version;              //TARS版本
     NodeInfo            _nodeInfo;             //服务所在node信息
     TC_Endpoint         _localEndpoint;        //本地socket

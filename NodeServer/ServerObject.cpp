@@ -17,6 +17,7 @@
 #include "ServerObject.h"
 #include "Activator.h"
 #include "RegistryProxy.h"
+#include "util/tc_port.h"
 #include "util/tc_clientsocket.h"
 #include "servant/Communicator.h"
 #include "NodeServer.h"
@@ -48,6 +49,79 @@ ServerObject::ServerObject( const ServerDescriptor& tDesc)
     _serviceLimitResource = new ServerLimitResource(5,10,60,_application,_serverName);
 }
 
+int64_t ServerObject::savePid()
+{
+    // vector<string> vtServerName =  TC_Common::sepstr<string>(_serverId, ".");
+    // if (vtServerName.size() != 2)
+    // {
+    //     sResult = sResult + "|failed to get pid for  " + _serverId + ",server id error";
+    //     NODE_LOG(_serverId)->error() << FILE_FUN << sResult  << endl;
+    //     throw runtime_error(sResult);
+    // }
+
+    // time_t tNow = TNOW;
+    // int iStartWaitInterval = START_WAIT_INTERVAL;
+
+    // //服务启动,超时时间自己定义的情况
+    // TC_Config conf;
+    // conf.parseFile(_confFile);
+    // iStartWaitInterval = TC_Common::strto<int>(conf.get("/tars/application/server<activating-timeout>", "3000")) / 1000;
+    // if (iStartWaitInterval < START_WAIT_INTERVAL)
+    // {
+    //     iStartWaitInterval = START_WAIT_INTERVAL;
+    // }
+    // if (iStartWaitInterval > 60)
+    // {
+    //     iStartWaitInterval = 60;
+    // }
+
+    string sPidFile = ServerConfig::TarsPath + FILE_SEP + "tarsnode" + FILE_SEP + "data" + FILE_SEP + _serverId + FILE_SEP + _serverId + ".pid";
+
+#if TARGET_PLATFORM_WINDOWS
+    // string sGetServerPidScript = "ps -ef | grep -v 'grep' |grep -iE '" + _startScript + "'| awk '{print $2}' > " + sPidFile;
+
+    string sGetServerPidScript = "wmic process get executablepath,processid | " + ServerConfig::TarsPath + FILE_SEP + "tarsnode\\util\\busybox.exe grep \"" + _startScript + "\" >" + sPidFile ;
+#else
+    // string sGetServerPidScript = "ps -ef | grep -v 'grep' |grep -iE '" + _startScript + "'| awk '{print $2}' > " + sPidFile;
+
+    string sGetServerPidScript = "ps -ef | grep -v grep | grep -iE '" + _startScript + "' | awk '{print $8 \" \"$2}' >" + sPidFile;
+#endif
+
+    // while ((TNOW - iStartWaitInterval) < tNow)
+    // {
+        //注意:由于是守护进程,不要对sytem返回值进行判断,始终wait不到子进程
+    system(sGetServerPidScript.c_str());
+
+    string data = TC_File::load2str(sPidFile);
+
+    int64_t iPid = -1;
+    vector<string> v = TC_Common::sepstr<string>(data, " \t");
+    if(v.size() > 2)
+    {
+        string sPid = TC_Common::trim(v[1]);
+        if (TC_Common::isdigit(sPid))
+        {
+            iPid = TC_Common::strto<int64_t>(sPid);
+            setPid(iPid);
+            if (checkPid() != 0)
+            {
+                iPid = -1;
+            }
+        }
+    }
+
+    if (TC_File::isFileExist(sPidFile))
+    {
+        TC_File::removeFile(sPidFile, false);
+    }
+    
+    // NODE_LOG(_serverId)->debug() << FILE_FUN << < " activating usleep " << int(iStartWaitInterval) << endl;
+    // std::this_thread::sleep_for(std::chrono::milliseconds(START_SLEEP_INTERVAL/1000));
+    // }
+
+    return iPid;
+}
+
 void ServerObject::setServerDescriptor( const ServerDescriptor& tDesc )
 {
     _desc          = tDesc;
@@ -74,7 +148,7 @@ bool ServerObject::isAutoStart()
 {
     Lock lock(*this);
 
-    NODE_LOG(_serverId)->debug()<<FILE_FUN<< _serverId <<"|"<<_enabled<<"|"<<_loaded<<"|"<<_patched<<"|"<<toStringState(_state)<<endl;
+    // NODE_LOG(_serverId)->debug()<<FILE_FUN<< _serverId <<"|"<<_enabled<<"|"<<_loaded<<"|"<<_patched<<"|"<<toStringState(_state)<<endl;
     if(toStringState(_state).find( "ing" ) != string::npos)  //正处于中间态时不允许重启动
     {
 	    NODE_LOG(_serverId)->debug() << "ServerObject::isAutoStart " << _serverId <<" not allow to restart in (ing) state"<<endl;
@@ -90,6 +164,25 @@ bool ServerObject::isAutoStart()
         return false;
     }
     return true;
+}
+
+void ServerObject::setExeFile(const string &sExeFile)
+{
+    string ext = TC_Common::trim(TC_File::extractFileExt(sExeFile));
+
+#if TARGET_PLATFORM_WINDOWS
+    if(ext.empty())
+    {
+        _exeFile = sExeFile + ".exe";
+    }
+    else
+    {
+        _exeFile = sExeFile;
+    }
+#else
+    _exeFile = sExeFile;
+#endif    
+    NODE_LOG(_serverId)->debug() << "ServerObject::setExeFile: " << _exeFile <<endl;
 }
 
 ServerState ServerObject::getState()
@@ -165,11 +258,12 @@ void ServerObject::synState()
         //防止主控超时导致阻塞服务上报心跳
         if(_noticeFailTimes < 3)
         {
-            AdminProxy::getInstance()->getRegistryProxy()->tars_set_timeout(1000)->updateServer( _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
+            int ret = AdminProxy::getInstance()->getRegistryProxy()->tars_set_timeout(1000)->updateServer( _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
+            onUpdateServerResult(ret);
         }
         else
         {
-            AdminProxy::getInstance()->getRegistryProxy()->async_updateServer(NULL, _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
+            AdminProxy::getInstance()->getRegistryProxy()->async_updateServer(this, _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
         }
 
         //日志
@@ -177,8 +271,8 @@ void ServerObject::synState()
         tServerStateInfo.displaySimple(ss);
         NODE_LOG(_serverId)->debug()<<FILE_FUN << "synState" << "|"<< _nodeInfo.nodeName << "|" <<  _serverId << "|" << std::boolalpha << _enSynState <<"|" << ss.str() << endl;
 
-        _noticed = true;
-        _noticeFailTimes = 0;
+        //_noticed = true;
+        //_noticeFailTimes = 0;
     }
     catch (exception &e)
     {
@@ -197,7 +291,7 @@ void ServerObject::asyncSynState()
         ServerStateInfo tServerStateInfo;
         tServerStateInfo.serverState    = (IsEnSynState()?toServerState(_state):tars::Inactive);
         tServerStateInfo.processId      = _pid;
-        AdminProxy::getInstance()->getRegistryProxy()->async_updateServer( NULL, _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
+        AdminProxy::getInstance()->getRegistryProxy()->async_updateServer( this, _nodeInfo.nodeName,  _application, _serverName, tServerStateInfo);
 
         //日志
         stringstream ss;
@@ -316,7 +410,7 @@ int ServerObject::checkPid()
 		CloseHandle(hProcess);
         if (iRet == 0)
         {
-            NODE_LOG(_serverId)->info() <<FILE_FUN<< _serverId << "|" << _pid << " exists, ret:" << iRet << ", " <<  TC_Exception::getSystemCode() << endl;
+            // NODE_LOG(_serverId)->info() <<FILE_FUN<< _serverId << "|" << _pid << " exists, ret:" << iRet << ", " <<  TC_Exception::getSystemCode() << endl;
             return 0;
         }
 
@@ -330,7 +424,7 @@ int ServerObject::checkPid()
 			return -1;
 		}
 
-		NODE_LOG(_serverId)->debug() <<FILE_FUN<< _serverId << "|" << _pid << "| pid exists, ret:" << iRet << ", " << TC_Exception::getSystemCode() << endl;
+		// NODE_LOG(_serverId)->debug() <<FILE_FUN<< _serverId << "|" << _pid << "| pid exists, ret:" << iRet << ", " << TC_Exception::getSystemCode() << endl;
 
 		return 0;
 #endif
@@ -347,24 +441,28 @@ void ServerObject::keepAlive(int64_t pid,const string &adapter)
 	    NODE_LOG(_serverId)->error() << "ServerObject::keepAlive "<< _serverId << " pid "<<pid<<" error, pid <= 0"<<endl;
         return;
     }
-    else
-    {
-	    NODE_LOG(_serverId)->debug() << "ServerObject::keepAlive " <<_serverType<< ", pid:" << pid <<", adapter:" << adapter<< endl;
-    }
+    // else
+    // {
+	//     NODE_LOG(_serverId)->debug() << "ServerObject::keepAlive " <<_serverType<< ", pid:" << pid <<", adapter:" << adapter<< endl;
+    // }
     time_t now  = TNOW;
     setLastKeepAliveTime(now,adapter);
-    setPid(pid);
+    
+    //Java KeepAliive服务有时会传来一个不存在的PID，会导致不断的启动新Java进程
+    if (0 != checkPid() || _state != ServerObject::Active)
+    {    
+        setPid(pid);
+    }
 
     //心跳不改变正在转换期状态(Activating除外)
     if(toStringState(_state).find("ing") == string::npos || _state == ServerObject::Activating)
     {
-	    NODE_LOG(_serverId)->debug() << "ServerObject::keepAlive " << _serverId << ", state:" << toStringState(_state) << endl;
         setState(ServerObject::Active);
     }
-    else
-    {
-	    NODE_LOG(_serverId)->debug() << "ServerObject::keepAlive " << _serverId << " State no need changed to active!  State:" << toStringState( _state ) << endl;
-    }
+    // else
+    // {
+	//     NODE_LOG(_serverId)->debug() << "ServerObject::keepAlive " << _serverId << " State no need changed to active!  State:" << toStringState( _state ) << endl;
+    // }
 
     if(!_loaded)
     {
@@ -402,7 +500,7 @@ void ServerObject::setLastKeepAliveTime(time_t t,const string& adapter)
     Lock lock(*this);
     _keepAliveTime = t;
 
-	NODE_LOG(_serverId)->debug() << "setLastKeepAliveTime keepAliveTime:" << _keepAliveTime << ", now:" << TNOW << endl;
+	// NODE_LOG(_serverId)->debug() << "setLastKeepAliveTime keepAliveTime:" << _keepAliveTime << ", now:" << TNOW << endl;
 
     map<string, time_t>::iterator it1 = _adapterKeepAliveTime.begin();
     if(adapter.empty())
@@ -467,7 +565,7 @@ bool ServerObject::isStartTimeOut()
 	Lock lock(*this);
 	int64_t now = TNOWMS;
 
-	int timeout = 2000;
+	int timeout = 11000;
 	if (now - _startTime >= timeout && now - _keepAliveTime >= timeout)
 	{
 		NODE_LOG(_serverId)->debug()<<FILE_FUN<<"server start time  out "<<now - _startTime << ">" <<timeout<<endl;
@@ -532,7 +630,7 @@ string ServerObject::getPatchVersion()
 
 int ServerObject::getPatchPercent(PatchInfo &tPatchInfo)
 {
-    NODE_LOG(_serverId)->debug() << "ServerObject::getPatchPercent"<< _application << "_" << _serverName << "|"<< _serverId<< endl;
+    NODE_LOG(_serverId)->debug() << "ServerObject::getPatchPercent, "<< _application << "_" << _serverName << "|"<< _serverId<< endl;
 
     Lock lock(*this);
 
@@ -542,7 +640,7 @@ int ServerObject::getPatchPercent(PatchInfo &tPatchInfo)
 
     if (tPatchInfo.bSucc == true || _state == ServerObject::Patching || _state == ServerObject::BatchPatching)
     {
-	    NODE_LOG(_serverId)->debug() << "ServerObject::getPatchPercent "<< _desc.application
+	    NODE_LOG(_serverId)->debug() << "ServerObject::getPatchPercent, "<< _desc.application
             << "|" << _desc.serverName << "|succ:" << (tPatchInfo.bSucc?"true":"false") << "|" << toStringState(_state) << "|" << _patchInfo.iPercent << "%|" << _patchInfo.sResult << endl;
         return 0;
     }
@@ -622,6 +720,14 @@ void ServerObject::doMonScript()
                  }
             }
         }
+        else if(!_startScript.empty() || isTarsServer() == false)
+        {
+            int64_t pid = savePid();
+            if(pid >= 0)
+            {
+                keepAlive(pid); 
+            }
+        }
     }
     catch (exception &e)
     {
@@ -638,11 +744,11 @@ void ServerObject::checkServer(int iTimeout)
 
 	    int flag = checkPid();
 
-		NODE_LOG(_serverId)->info() <<FILE_FUN<< _serverId<<"|" << toStringState(_state) << "|" << _pid << ", flag:" << flag << ", auto start:" << isAutoStart() << endl;
-		NODE_LOG("KeepAliveThread")->info() <<FILE_FUN<< _serverId<<"|" << toStringState(_state) << "|" << _pid << ", flag:" << flag << ", auto start:" << isAutoStart() << endl;
-
 		if(flag != 0 && _state != ServerObject::Inactive)
 		{
+    		NODE_LOG(_serverId)->info() <<FILE_FUN<< _serverId<<"|" << toStringState(_state) << "|" << _pid << ", flag:" << flag << ", auto start:" << isAutoStart() << endl;
+		    NODE_LOG("KeepAliveThread")->info() <<FILE_FUN<< _serverId<<"|" << toStringState(_state) << "|" << _pid << ", flag:" << flag << ", auto start:" << isAutoStart() << endl;
+
 			//pid不存在, 同步状态
 			setState(ServerObject::Inactive, true);
 		}
@@ -662,8 +768,6 @@ void ServerObject::checkServer(int iTimeout)
 					CommandStop command(this, false);
 					command.doProcess();
 				}
-//				NODE_LOG(_serverId)->debug()<<FILE_FUN<< _serverId << " is not be started"<<endl;
-//				NODE_LOG("KeepAliveThread")->debug()<<FILE_FUN << _serverId <<" is not be started"<<endl;
 			}
 		}
 
@@ -777,7 +881,7 @@ void ServerObject::checkCoredumpLimit()
 
 	if(!_limitStateInfo.bEnableCoreLimit)
 	{
-		NODE_LOG(_serverId)->debug() << FILE_FUN << getServerId() <<", server is disable corelimit"<<endl;
+		// NODE_LOG(_serverId)->debug() << FILE_FUN << getServerId() <<", server is disable corelimit"<<endl;
 		return;
 	}
 
@@ -863,4 +967,32 @@ void ServerObject::setStartTime(int64_t iStartTime)
 {
 	Lock lock(*this);
 	_startTime = iStartTime;
+}
+
+void ServerObject::onUpdateServerResult(int result)
+{
+    if(result < 0)
+    {
+        _noticed = false;
+        _noticeFailTimes ++;
+
+        TLOGERROR("Update server:"<<_application<<"."<<_serverName<<" failed, error times:"<<_noticeFailTimes<<", result:"<<result<< endl);
+    }
+    else
+    {
+        _noticed = true;
+        _noticeFailTimes = 0;
+
+        TLOGDEBUG("Update server: "<<_application<<"."<<_serverName<<" ok"<<endl);
+    }
+}
+
+void ServerObject::callback_updateServer(tars::Int32 ret)
+{
+    onUpdateServerResult(ret);
+}
+
+void ServerObject::callback_updateServer_exception(tars::Int32 ret)
+{
+    onUpdateServerResult(ret == 0 ? -1 : ret);
 }

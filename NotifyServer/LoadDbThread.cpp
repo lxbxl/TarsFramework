@@ -16,6 +16,9 @@
 
 #include "LoadDbThread.h"
 #include "NotifyServer.h"
+#include "NotifyF.h"
+
+using namespace tars;
 
 LoadDbThread::LoadDbThread()
 : _interval(30)
@@ -46,6 +49,7 @@ void LoadDbThread::init()
 {
     try
     {
+
         map<string, string> mDbConf = g_pconf->getDomainMap("/tars/db");
         assert(!mDbConf.empty());
 
@@ -54,7 +58,7 @@ void LoadDbThread::init()
 
         _mysql.init(tcDBConf);
 
-        TLOGDEBUG("LoadDbThread::init init mysql conf succ." << endl);
+	    TLOGDEBUG("LoadDbThread::init init mysql conf succ." << endl);
     }
     catch(exception &ex)
     {
@@ -67,10 +71,10 @@ void LoadDbThread::init()
 void LoadDbThread::run()
 {
     size_t iLastTime = 0;
-    size_t iNow = TNOW;
 
     while (!_terminate)
     {
+        size_t iNow = TNOW;
         if(iNow - iLastTime >= _interval)
         {
             iLastTime = iNow;

@@ -18,12 +18,12 @@ add_subdirectory(tarscpp)
 
 include_directories(${servant_SOURCE_DIR})
 
+set(BUILD_SERVER servers)
+
 if(WIN32)
-    set(BUILD_SERVER servers-win)
     set(TARS_INSTALL_PATH c:\\tars-install)
 else(WIN32)
-    set(BUILD_SERVER servers)
-    set(TARS_INSTALL_PATH /usr/local/app/tars)
+    set(TARS_INSTALL_PATH /usr/local/app)
 endif(WIN32)
 
 macro(complice_module MODULE)
@@ -63,49 +63,9 @@ macro(complice_module MODULE)
     endif()
 endmacro()
 
-#调用tars2cpp, 生成tars对应的文件
-macro(complice_tars OUT_DEPENDS_LIST)
-    set(DEPENDS_LIST)
+add_subdirectory(mysql-tool)
+#add_subdirectory(tars-client)
 
-    set(SERVANT_PROTOCOL "${servant_SOURCE_DIR}/protocol/servant")
-
-    set(CLEAN_LIST)
-
-    set(CURRENT_PROTOCOL_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-
-    FILE(GLOB SRC_LIST "${CURRENT_PROTOCOL_DIR}/*.tars")
-
-    foreach (FILE ${SRC_LIST})
-
-        #设置tars文件搜索路径
-        set(INCLUDE_STRING "--include=\"${SERVANT_PROTOCOL}\"")
-
-        get_filename_component(NAME_WE ${FILE} NAME_WE)
-
-        # 生成tars文件
-        set(TARS_IN ${FILE})
-        set(TARS_H ${NAME_WE}.h)
-
-        add_custom_command(
-                OUTPUT ${CURRENT_PROTOCOL_DIR}/${TARS_H}
-                WORKING_DIRECTORY ${CURRENT_PROTOCOL_DIR}
-                DEPENDS tars2cpp
-                COMMAND ${TARS2CPP} --with-tars ${INCLUDE_STRING} ${TARS_IN}
-                COMMENT "${TARS2CPP} --with-tars ${INCLUDE_STRING} ${TARS_IN}")
-
-        list(APPEND DEPENDS_LIST ${CURRENT_PROTOCOL_DIR}/${TARS_H})
-
-        #设置需要清除的文件
-        list(APPEND CLEAN_LIST ${CURRENT_PROTOCOL_DIR}/${NAME_WE}.h)
-
-    endforeach ()
-
-    set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CLEAN_LIST}")
-
-    set(OUT_DEPENDS_LIST ${DEPENDS_LIST})
-endmacro()
-
-add_subdirectory(tarscpp/servant/protocol/framework)
 add_subdirectory(ConfigServer)
 add_subdirectory(NodeServer)
 add_subdirectory(NotifyServer)
@@ -129,7 +89,6 @@ list(APPEND DEPENDS_LIST tarsAdminRegistry)
 list(APPEND DEPENDS_LIST tarspatch)
 list(APPEND DEPENDS_LIST tarsconfig)
 
-#set(FRAMEWORK-TGZ "${CMAKE_BINARY_DIR}/framework-tmp.tgz")
 set(FRAMEWORK-TGZ "${CMAKE_BINARY_DIR}/framework.tgz")
 
 #执行命令
@@ -173,66 +132,53 @@ endforeach ()
 
 install(DIRECTORY ${PROJECT_BINARY_DIR}/${BUILD_SERVER}/ DESTINATION deploy/framework/${BUILD_SERVER}
         PATTERN "tars*"
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ)
-        
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
+
 IF(WIN32)
 install(DIRECTORY deploy DESTINATION ./ 
         PATTERN "*.bat"
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ)
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
+
+install(FILES ${PROJECT_BINARY_DIR}/src/mysql/lib/libmysql.dll DESTINATION deploy)
+
 else(WIN32)
 install(DIRECTORY deploy DESTINATION ./ 
         PATTERN "*.sh"
-        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ)
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
 ENDIF(WIN32)
+
 ############################################################################################
 #for debug
 
-add_custom_target(cp-tarsAdminRegistry
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsAdminRegistry
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsAdminRegistry/bin/tarsAdminRegistry ${TARS_INSTALL_PATH}/tarsAdminRegistry/bin/tarsAdminRegistry
-        COMMAND sh ${TARS_INSTALL_PATH}/tarsAdminRegistry/util/start.sh
-        COMMENT "cp tarsAdminRegistry & restart")
+macro(copy_server server)
+if(WIN32)
+        add_custom_target(cp-${server}
+                WORKING_DIRECTORY ${WORKING_DIRECTORY}
+                DEPENDS ${server}
+                # COMMAND ${TARS_INSTALL_PATH}/${server}/util/stop.bat
+                COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/${server}/bin/${server}.exe ${TARS_INSTALL_PATH}/tars/${server}/bin/
+                # COMMAND start /b ${TARS_INSTALL_PATH}/${server}/util/start.bat
+                COMMENT "cp ${server} & restart: copy ${BUILD_SERVER}/${server}/bin/${server}.exe ${TARS_INSTALL_PATH}/tars/${server}/bin/")
+else(WIN32)
+        add_custom_target(cp-${server}
+                WORKING_DIRECTORY ${WORKING_DIRECTORY}
+                DEPENDS ${server}
+                COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/${server}/bin/${server} ${TARS_INSTALL_PATH}/tars/${server}/bin/
+                COMMAND ${TARS_INSTALL_PATH}/tars/${server}/util/start.sh
+                COMMENT "cp ${server} & restart")
+endif(WIN32)
+endmacro()
 
-add_custom_target(cp-tarsnotify
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsnotify
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsnotify/bin/tarsnotify ${TARS_INSTALL_PATH}/tarsnotify/bin/tarsnotify
-        COMMAND sh ${TARS_INSTALL_PATH}/tarsnotify/util/start.sh
-        COMMENT "cp tarsnotify & restart")
-
-add_custom_target(cp-tarsnode
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsnode
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsnode/bin/tarsnode ${TARS_INSTALL_PATH}/tarsnode/bin/tarsnode
-        COMMAND sh ${TARS_INSTALL_PATH}/tarsnode/util/start.sh
-        COMMENT "cp tarsnode & restart")
-
-add_custom_target(cp-tarsstat
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsstat
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsstat/bin/tarsstat ${TARS_INSTALL_PATH}/tarsstat/bin/tarsstat
-        COMMAND sh ${TARS_INSTALL_PATH}/tarsstat/util/start.sh
-        COMMENT "cp tarsstat & restart")
-
-add_custom_target(cp-tarsquerystat
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsquerystat
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsquerystat/bin/tarsquerystat ${TARS_INSTALL_PATH}/tarsquerystat/bin/tarsquerystat
-        COMMAND ${TARS_INSTALL_PATH}/tarsquerystat/util/start.sh
-        COMMENT "cp tarsquerystat & restart")
-
-add_custom_target(cp-tarsqueryproperty
-        WORKING_DIRECTORY ${WORKING_DIRECTORY}
-        DEPENDS tarsqueryproperty
-        COMMAND ${CMAKE_COMMAND} -E copy ${BUILD_SERVER}/tarsqueryproperty/bin/tarsqueryproperty ${TARS_INSTALL_PATH}/tarsqueryproperty/bin/tarsqueryproperty
-        COMMAND ${TARS_INSTALL_PATH}/tarsqueryproperty/util/start.sh
-        COMMENT "cp tarsqueryproperty & restart")
-
-
-
-
-
+copy_server(tarsAdminRegistry)
+copy_server(tarsnotify)
+copy_server(tarsnode)
+copy_server(tarsstat)
+copy_server(tarsquerystat)
+copy_server(tarsqueryproperty)
+copy_server(tarsregistry)
+copy_server(tarslog)
+copy_server(tarspatch)
+copy_server(tarsproperty)
 
 
 

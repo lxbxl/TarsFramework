@@ -20,7 +20,7 @@
 #include "util/tc_thread.h"
 #include "util/tc_monitor.h"
 #include "util/tc_mysql.h"
-#include "servant/TarsLogger.h"
+#include "servant/RemoteLogger.h"
 //#include "NotifyServer.h"
 
 using namespace std;
@@ -78,7 +78,7 @@ private:
 };
 
 /**
- * ��db����set�����Ϣ���߳���
+ *
  */
 class LoadDbThread : public TC_Thread, public tars::TC_ThreadLock
 {
@@ -86,22 +86,22 @@ public:
     typedef DataWrapper< map<string, string> > Data;
 
     /**
-     * ���캯��
+     *
      */
     LoadDbThread();
 
     /**
-     * ��������
+     *
      */
     ~LoadDbThread();
 
     /**
-     * ��ʼ��
+     *
      */
     void init();
     
     /**
-     * ����
+     *
      */
     void run();
 
@@ -111,7 +111,7 @@ public:
     void terminate();
 
     /**
-     * ��ȡset��Ϣ
+     *
      */
     string getSetName(const string &sAppName)
     {
@@ -130,21 +130,22 @@ public:
 private:
 
     /**
-     * ����db����
+     *
      */
     void loadData();
 
 private:
-    //����db���ݵ�ʱ����
+
+    //
     size_t   _interval;
 
     //ֹͣ
     bool     _terminate;
 
-    //�������ݿ�
+    //
     TC_Mysql _mysql;
     
-    //˫buff����
+    //
     Data     _data;
 };
 
